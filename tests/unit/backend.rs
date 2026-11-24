@@ -985,3 +985,84 @@ async fn what_the_user_has_the_server_do_moves_the_window_with_the_servers_tab()
     assert!(more.await.is_err());
     assert!(shown("w2")(&client.snapshot()));
 }
+
+#[tokio::test]
+async fn a_session_made_is_shown_from_its_first_window() {
+    use served::{answer, asked, next, say, until, view};
+    let server = served::Server::at("made");
+    let (client, _notes) = server.client();
+    let mut socket = server.welcome().await.unwrap();
+    // Nothing is on show, so nothing is attached. An empty list is how that is
+    // asked, and a revision 19 server then leaves out attached_sessions and
+    // sets selected_session to null. No session is shown for that.
+    let (id, method, payload) = asked(&mut socket).await.unwrap();
+    assert_eq!(method, "session.bootstrap");
+    assert_eq!(payload["event_scope"], "all");
+    assert_eq!(payload["attach_session_ids"], json!([]));
+    let named = json!([{"session_id": "s1", "label": "s1"}]);
+    let boot = json!({"attach_all": {"sessions": named}, "selected_session": Value::Null});
+    answer(&mut socket, &id, boot).await;
+    let mut views = HashMap::new();
+    for _ in 0..2 {
+        let (id, method, payload) = asked(&mut socket).await.unwrap();
+        match method.as_str() {
+            "session.view" => {
+                let session = payload["session_id"].as_str().unwrap().to_owned();
+                views.insert(session, id);
+            }
+            _ => answer(&mut socket, &id, json!({})).await,
+        }
+    }
+    answer(&mut socket, &views["s1"], view(1, "w1", &[])).await;
+    let connected = until(&client, "a connection", |v| v.connected).await;
+    assert!(connected.selected_session.is_none());
+    let seen = &mut Vec::new();
+    // The window and the pane come back under initial_windows, not beside the
+    // session. The session is shown at that window, and the pane takes the
+    // keyboard, once the session is listed and its view has the window.
+    client.try_send(Action::CreateSession(Some("Second".into()))).unwrap();
+    let (id, payload) = next(&mut socket, "session.create", seen).await;
+    assert_eq!(payload["label"], "Second");
+    let flavor = &payload["initial_windows"][0]["layout"]["block"]["flavor"];
+    assert_eq!(flavor, "com.superlogical.terminal.shell");
+    let made = json!({
+        "session_id": "s2",
+        "initial_windows": [{"window_id": "w9", "block_ids": ["b9"], "revision": 1}],
+    });
+    answer(&mut socket, &id, made).await;
+    let created = json!({
+        "type": "session_created",
+        "payload": {"session": {"session_id": "s2", "label": "Second"}},
+    });
+    say(&mut socket, json!({"type": "event", "payload": created})).await;
+    let (id, asked) = next(&mut socket, "session.view", seen).await;
+    assert_eq!(asked["session_id"], "s2");
+    answer(&mut socket, &id, view(1, "w9", &[("w9", Some(("b9", "client:1")))])).await;
+    let ready = |view: &View| {
+        view.selected_session.as_deref() == Some("s2")
+            && view.selected_tab.as_deref() == Some("w9")
+            && view.made.as_deref() == Some("b9")
+    };
+    until(&client, "the session made", ready).await;
+    // A server that names the window beside the session, as it names a new
+    // tab, is shown the same way.
+    client.try_send(Action::CreateSession(None)).unwrap();
+    let (id, payload) = next(&mut socket, "session.create", seen).await;
+    assert!(payload.get("label").is_none());
+    let made = json!({"session_id": "s3", "window_id": "w3", "block_ids": ["b3"], "revision": 1});
+    answer(&mut socket, &id, made).await;
+    let created = json!({
+        "type": "session_created",
+        "payload": {"session": {"session_id": "s3", "label": "Third"}},
+    });
+    say(&mut socket, json!({"type": "event", "payload": created})).await;
+    let (id, asked) = next(&mut socket, "session.view", seen).await;
+    assert_eq!(asked["session_id"], "s3");
+    answer(&mut socket, &id, view(1, "w3", &[("w3", Some(("b3", "client:1")))])).await;
+    let ready = |view: &View| {
+        view.selected_session.as_deref() == Some("s3")
+            && view.selected_tab.as_deref() == Some("w3")
+            && view.made.as_deref() == Some("b3")
+    };
+    until(&client, "the session named beside itself", ready).await;
+}

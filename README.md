@@ -80,7 +80,7 @@ With the mouse: drag the line between two panes to resize them, drag a pane's he
 - **State** is kept in `rexy/state.json` under `$XDG_STATE_HOME` or `~/.local/state`.
 - **Not yet:** moving a pane to another session, animated pictures.
 
-Rexy speaks revisions 13 to 18 of Rex's control API, and refuses a server too old for the first of them.
+Rexy speaks revisions 13 to 19 of Rex's control API, and refuses a server too old for the first of them.
 
 ## Development
 

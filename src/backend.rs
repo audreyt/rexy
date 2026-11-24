@@ -1066,15 +1066,29 @@ impl<'a> Connection<'a> {
             (Reply::Change(session, made, new), answer) => match answer {
                 Ok(changed) => {
                     // A session it made is shown once listed, a tab once its
-                    // session has it, and a pane once on show.
+                    // session has it, and a pane once on show. A new session
+                    // names its first window under `initial_windows`; a new
+                    // tab names its own beside the session.
                     let text = |value: &Value| value.as_str().map(str::to_owned);
+                    let opened = &changed["initial_windows"][0];
+                    let window = text(&changed["window_id"]).or_else(|| text(&opened["window_id"]));
+                    let block =
+                        text(&changed["block_ids"][0]).or_else(|| text(&opened["block_ids"][0]));
                     if new {
-                        let tab = (session.clone(), text(&changed["window_id"]));
-                        let made = text(&changed["session_id"]).map(|id| (id, None));
-                        self.making = Some(made.unwrap_or(tab));
+                        self.making = Some(match text(&changed["session_id"]) {
+                            Some(id) => (id, window),
+                            None => (session.clone(), window),
+                        });
                     }
-                    self.made = made.or(text(&changed["block_ids"][0])).or(self.made.take());
-                    let revision = changed["revision"].as_u64().unwrap_or(0);
+                    self.made = made.or(block).or(self.made.take());
+                    let revision =
+                        changed["revision"].as_u64().or(opened["revision"].as_u64()).unwrap_or(0);
+                    // The session just made has no name but the one in the answer.
+                    let session = if session.is_empty() {
+                        text(&changed["session_id"]).unwrap_or(session)
+                    } else {
+                        session
+                    };
                     self.want(&session, revision).await;
                 }
                 Err(error) => self.shared.fail(error.to_string()),

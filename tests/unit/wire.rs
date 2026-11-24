@@ -472,10 +472,10 @@ async fn the_server_says_why_it_closes_the_control_connection() {
     assert_eq!(behind, Ended::Closed { code, reason });
     let words = "This client fell too far behind the server's news";
     assert_eq!(behind.to_string(), words);
-    let reason = "no common API revision: server speaks 14 to 15, client needs 13 to 18; \
+    let reason = "no common API revision: server speaks 14 to 15, client needs 13 to 19; \
                   update the client";
     let new = ended(close(1008, reason)).await;
-    let why = "server speaks 14 to 15, client needs 13 to 18; update the client";
+    let why = "server speaks 14 to 15, client needs 13 to 19; update the client";
     assert_eq!(new, Ended::Incompatible(why.into()));
     let words = format!("This client and the server share no API revision: {why}");
     assert_eq!(new.to_string(), words);
@@ -608,16 +608,39 @@ async fn a_client_is_welcomed_at_a_socket_or_told_why_not() {
     assert_eq!(hello["type"], "hello");
     assert_eq!(hello["reconnect_token"], "last");
     // It offers the newest revision it was written for, and the oldest it can do with.
-    assert_eq!((&hello["api_revision"], &hello["api_min_revision"]), (&json!(18), &json!(13)));
+    let offered = (&hello["api_revision"], &hello["api_min_revision"]);
+    assert_eq!(offered, (&json!(19), &json!(13)));
     let Some(Message::Close(Some(frame))) = last else {
         panic!("the server was sent no close frame");
     };
     assert_eq!(frame.code, CloseCode::Normal);
     std::fs::remove_file(&path).unwrap();
+    // A revision 19 server, as 0.1.0-preview.23 welcomes one: the revision agreed
+    // and the newest the server speaks, with no api_min_revision. `resumed` is
+    // left out when it is false.
+    let welcome = json!({
+        "type": "welcome",
+        "protocol": CONTROL_PROTOCOL,
+        "api_revision": 19,
+        "api_server_revision": 19,
+        "limits": {"max_message_bytes": 65536},
+        "client": {"id": "client:2", "reconnect_token": "again"},
+    });
+    let welcome = Message::Text(welcome.to_string().into());
+    let server = tokio::spawn(serve(listener(), welcome));
+    let mut control = connect(None).await.unwrap();
+    assert_eq!(control.client_id, "client:2");
+    assert!(!control.resumed);
+    assert_eq!(control.reconnect_token.as_deref(), Some("again"));
+    control.close().await;
+    let (hello, _) = server.await.unwrap();
+    let offered = (&hello["api_revision"], &hello["api_min_revision"]);
+    assert_eq!(offered, (&json!(19), &json!(13)));
+    std::fs::remove_file(&path).unwrap();
     // A server that cannot serve the client closes instead of welcoming it. One too
     // old to know that welcomes it at a revision it did not offer. Both are told
     // of in the same words.
-    let why = "server speaks 0 to 12, client needs 13 to 18; update the server";
+    let why = "server speaks 0 to 12, client needs 13 to 19; update the server";
     let refusal = Message::Close(close(1008, &format!("no common API revision: {why}")));
     let old = json!({"type": "welcome", "protocol": CONTROL_PROTOCOL, "api_server_revision": 12});
     for answer in [refusal, Message::Text(old.to_string().into())] {

@@ -31,7 +31,7 @@ const CONTROL_PROTOCOL: &str = "rex.control.v1";
 /// first, and was written for none newer than the last, which a newer server still
 /// speaks to it. A server asks an action's questions only of a client that speaks
 /// revision 17.
-const REVISIONS: std::ops::RangeInclusive<u64> = 13..=18;
+const REVISIONS: std::ops::RangeInclusive<u64> = 13..=19;
 /// How a server begins its reason for closing on a client it shares no revision with.
 const REFUSAL: &str = "no common API revision";
 const MAX_IN_FLIGHT: usize = 64;
